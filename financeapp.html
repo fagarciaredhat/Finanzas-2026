@@ -99,13 +99,27 @@ const fd=f=>new Date(f+'T00:00').toLocaleDateString('es-SV',{day:'numeric',month
 const st=s=>{const e=$('#st');e.className=s;e.title={ok:'Sincronizado',sync:'Sincronizando…',err:'Sin conexión: se reintentará solo'}[s]};
 
 /* ---- sincronización: cola de envío + lectura periódica ---- */
-let fl=false;
+let fl=false,rev=0,lastW=0;
+const ARR=['Movimientos','Tarjetas','Cuentas','Presupuestos','Planificados'];
 async function flush(){if(fl)return;fl=true;
-  try{while(OB.length){st('sync');const r=await fetch(URL_,{method:'POST',body:JSON.stringify(OB[0])});if(!r.ok)throw 0;OB.shift();localStorage.ob=JSON.stringify(OB)}st('ok')}catch(e){st('err')}fl=false}
-const q=op=>{OB.push({perfil:P,...op});localStorage.ob=JSON.stringify(OB);flush()};
-async function cargar(){if(OB.length)return flush();const p=P;
-  try{st('sync');const r=await fetch(URL_+'?perfil='+encodeURIComponent(p)),n={...vac(),...await r.json()};
-    if(p!=P||OB.length)return;st('ok');if(JSON.stringify(n)!=JSON.stringify(D)){D=n;sv();pintar()}}catch(e){st('err')}}
+  try{while(OB.length){st('sync');const r=await fetch(URL_,{method:'POST',body:JSON.stringify(OB[0])});if(!r.ok)throw 0;
+      let j=null;try{j=await r.json()}catch(_){}if(j&&j.error)throw 0;
+      OB.shift();localStorage.ob=JSON.stringify(OB);lastW=Date.now()}st('ok')}catch(e){st('err')}fl=false}
+/* rev sube con cada cambio local: sirve para detectar lecturas del Sheet que quedaron desactualizadas */
+const q=op=>{rev++;OB.push({perfil:P,...op});localStorage.ob=JSON.stringify(OB);flush()};
+/* respuesta válida = objeto con listas (nunca un {error:...} ni HTML); norm unifica tipos que Sheets suele alterar */
+const sane=n=>n&&typeof n=='object'&&!Array.isArray(n)&&!n.error&&ARR.every(k=>n[k]===undefined||Array.isArray(n[k]));
+const norm=n=>{const o={...vac(),...n};ARR.forEach(k=>o[k]=o[k].map(x=>({...x,id:String(x.id??'')})));
+  o.Movimientos=o.Movimientos.map(m=>({...m,fecha:String(m.fecha||'').slice(0,10)}));return o};
+const cnt=d=>ARR.reduce((s,k)=>s+(d[k]||[]).length,0);
+async function cargar(){if(OB.length||fl)return flush();const p=P,r0=rev,t0=Date.now();
+  try{st('sync');const r=await fetch(URL_+'?perfil='+encodeURIComponent(p));if(!r.ok)throw 0;
+    const raw=await r.json();if(!sane(raw))throw 0;
+    /* descartar si mientras llegaba la respuesta hubo cambios locales, o si se envió algo hace poco (el Sheet puede ir atrasado) */
+    if(p!=P||rev!=r0||OB.length||fl||t0-lastW<10000){if(!OB.length&&!fl)st('ok');return}
+    const n=norm(raw);
+    if(!cnt(n)&&cnt(D))throw 0; /* el Sheet "vacío" frente a datos locales es sospechoso: no borrar */
+    st('ok');if(JSON.stringify(n)!=JSON.stringify(D)){D=n;sv();pintar()}}catch(e){st('err')}}
 
 /* ---- cálculos ---- */
 function calc(per=mes){
@@ -242,6 +256,6 @@ $('#pf').onclick=e=>{const b=e.target.closest('[data-p]');if(!b||b.dataset.p==P)
 
 /* ---- inicio ---- */
 D=ld();mes=periodoDe(hoy(),diaC());perfiles();pintar();cargar();
-setInterval(()=>{if(!document.hidden)cargar()},15000);
+setInterval(()=>{if(!document.hidden)cargar()},60000);
 document.addEventListener('visibilitychange',()=>{if(!document.hidden)cargar()});addEventListener('online',cargar);
 </script></body></html>
