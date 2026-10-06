@@ -304,6 +304,6 @@ $('#pf').onclick=e=>{const b=e.target.closest('[data-p]');if(!b||b.dataset.p==P)
 
 /* ---- inicio ---- */
 D=ld();mes=periodoDe(hoy(),diaC());perfiles();pintar();cargar();
-setInterval(()=>{if(!document.hidden)cargar()},20000);
+setInterval(()=>{if(!document.hidden)cargar()},40000);
 document.addEventListener('visibilitychange',()=>{if(!document.hidden)cargar()});addEventListener('online',()=>cargar());$('#sy').onclick=manual;$('#st').onclick=()=>toast(OB.length?`${OB.length} cambio(s) pendiente(s) de enviar${lastErr?' · '+lastErr:''}`:lastErr?'⚠ '+lastErr:'✓ Todo sincronizado con tu Sheet');
 </script></body></html>
