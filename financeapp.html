@@ -99,18 +99,18 @@ const fd=f=>new Date(f+'T00:00').toLocaleDateString('es-SV',{day:'numeric',month
 const st=s=>{const e=$('#st');e.className=s;e.title={ok:'Sincronizado',sync:'Sincronizando…',err:'Sin conexión: se reintentará solo'}[s]};
 
 /* ---- sincronización: cola de envío + lectura periódica ---- */
-let fl=false,rev=0,lastW=0;
+let fl=false,rev=0,lastW=Number(localStorage.getItem('lastW')||0);
 const ARR=['Movimientos','Tarjetas','Cuentas','Presupuestos','Planificados'];
 async function flush(){if(fl)return;fl=true;
   try{while(OB.length){st('sync');const r=await fetch(URL_,{method:'POST',body:JSON.stringify(OB[0])});if(!r.ok)throw 0;
       let j=null;try{j=await r.json()}catch(_){}if(j&&j.error)throw 0;
-      OB.shift();localStorage.ob=JSON.stringify(OB);lastW=Date.now()}st('ok')}catch(e){st('err')}fl=false}
-/* rev sube con cada cambio local: sirve para detectar lecturas del Sheet que quedaron desactualizadas */
-let TB=JSON.parse(localStorage.tb||'{}'); /* operaciones locales recientes: se reaplican sobre lo que baje del Sheet */
-const q=op=>{rev++;lastW=Date.now();const i=op.fila?op.fila.id:op.id;TB[P+'|'+op.hoja+'|'+i]={t:Date.now(),p:P,h:op.hoja,i,f:op.accion=='del'?null:op.fila};localStorage.tb=JSON.stringify(TB);
+      OB.shift();localStorage.ob=JSON.stringify(OB);lastW=Date.now();localStorage.setItem('lastW',String(lastW))}
+    st('ok')}catch(e){st('err')}fl=false}
+/* Cada cambio local incrementa rev y deja persistido el último momento de escritura.
+   No se guardan operaciones para reaplicarlas sobre la lectura del Sheet: eso podía duplicar
+   movimientos si el backend devolvía el mismo registro con un ID diferente. */
+const q=op=>{rev++;lastW=Date.now();localStorage.setItem('lastW',String(lastW));
   OB.push({perfil:P,...op});localStorage.ob=JSON.stringify(OB);flush()};
-const replay=(n,p)=>{const now=Date.now();for(const k in TB){const e=TB[k];if(now-e.t>3e5){delete TB[k];continue}if(e.p!=p||!n[e.h])continue;
-  const L=n[e.h]=n[e.h].filter(x=>String(x.id)!=String(e.i));if(e.f)L.push({...e.f,id:String(e.f.id)})}localStorage.tb=JSON.stringify(TB);return n};
 /* respuesta válida = objeto con listas (nunca un {error:...} ni HTML); norm unifica tipos que Sheets suele alterar */
 const sane=n=>n&&typeof n=='object'&&!Array.isArray(n)&&!n.error&&ARR.every(k=>n[k]===undefined||Array.isArray(n[k]));
 const fch=(f,n)=>{f=String(f||'');if(/^\d{4}-\d{2}-\d{2}/.test(f))return f.slice(0,n);const d=new Date(f);return isNaN(d)?f:d.toLocaleDateString('en-CA').slice(0,n)};
@@ -120,13 +120,18 @@ const norm=n=>{const o={...vac(),...n};ARR.forEach(k=>o[k]=o[k].map(x=>({...x,id
   o.Presupuestos=o.Presupuestos.map(x=>/^\d{4}-\d{2}-\d{2}/.test(x.id)?{...x,id:x.id.slice(0,7)}:x);return o};
 const cnt=d=>ARR.reduce((s,k)=>s+(d[k]||[]).length,0);
 let gen=0;
-async function cargar(){if(OB.length||fl)return flush();const p=P,r0=rev,t0=Date.now(),g=++gen;
+async function cargar(){
+  if(OB.length||fl)return flush();
+  const recent=Number(localStorage.getItem('lastW')||0);
+  if(recent&&Date.now()-recent<15000){st('ok');return}
+  const p=P,r0=rev,t0=Date.now(),g=++gen;
   try{st('sync');const r=await fetch(URL_+'?perfil='+encodeURIComponent(p)+'&_='+t0,{cache:'no-store'});if(!r.ok)throw 0;
     const raw=await r.json();if(!sane(raw))throw 0;
     if(g!=gen||p!=P||rev!=r0||OB.length||fl||t0-lastW<10000){if(!OB.length&&!fl)st('ok');return}
     const n=norm(raw);
     if(!cnt(n)&&cnt(D))throw 0;
-    replay(n,p);if(ARR.some(k=>(n[k]||[]).length<(D[k]||[]).length))throw 0;st('ok');if(JSON.stringify(n)!=JSON.stringify(D)){D=n;sv();pintar()}}catch(e){st('err')}}
+    if(ARR.some(k=>(n[k]||[]).length<(D[k]||[]).length))throw 0;
+    st('ok');if(JSON.stringify(n)!=JSON.stringify(D)){D=n;sv();pintar()}}catch(e){st('err')}}
 
 /* ---- cálculos ---- */
 function calc(per=mes){
